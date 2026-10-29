@@ -1,0 +1,79 @@
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-itops_root_2026}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-itops}
+      MYSQL_USER: ${MYSQL_USER:-itops}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-itops_2026}
+      # 时区必须与业务本地时间一致，否则 NOW() 与工单时间差 8 小时（会出现「已挂 -7h」的怪值）
+      TZ: Asia/Shanghai
+    # 服务器默认时区固定为东八区：NOW()/CURDATE() 全部按北京时间
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-time-zone=+08:00
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-itops_root_2026}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - itops-net
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      TZ: Asia/Shanghai
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${MYSQL_DATABASE:-itops}
+      DB_USER: ${MYSQL_USER:-itops}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-itops_2026}
+      JWT_SECRET: ${JWT_SECRET:-change_this_secret_in_prod}
+      # 首次启动创建的管理员初始口令（用户表为空时生效）
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-admin123}
+      UPLOAD_DIR: /app/uploads
+      # 备份包存放目录（挂卷，重建容器不丢）
+      BACKUP_DIR: /app/backups
+      # 本地 AI 服务在宿主机时：容器内用 host.docker.internal 访问宿主机
+      IN_DOCKER: "1"
+      AI_LOCALHOST_ALIAS: ${AI_LOCALHOST_ALIAS:-host.docker.internal}
+    extra_hosts:
+      # 让 Linux 宿主机也能解析 host.docker.internal（Docker Desktop 默认已支持）
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/backups:/app/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - itops-net
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - itops-net
+
+volumes:
+  db_data:
+
+networks:
+  itops-net:
+    driver: bridge

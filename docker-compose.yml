@@ -12,7 +12,8 @@ services:
     # 服务器默认时区固定为东八区：NOW()/CURDATE() 全部按北京时间
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-time-zone=+08:00
     ports:
-      - "3306:3306"
+      # 仅宿主机本地可连，便于运维排查；公网/局域网都连不上数据库
+      - "127.0.0.1:3306:3306"
     volumes:
       - db_data:/var/lib/mysql
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -50,7 +51,8 @@ services:
       # 让 Linux 宿主机也能解析 host.docker.internal（Docker Desktop 默认已支持）
       - "host.docker.internal:host-gateway"
     ports:
-      - "3000:3000"
+      # 仅本机可直连（便于调试），内网访问统一走 frontend 的 nginx
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./backend/uploads:/app/uploads
       - ./backend/backups:/app/backups
@@ -60,14 +62,66 @@ services:
     networks:
       - itops-net
 
+  # ===========================================================================
+  #  管理端前端（内网）：完整后台界面，只映射 8080，供内网电脑/手机访问
+  # ===========================================================================
   frontend:
     build:
       context: ./frontend
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "${ADMIN_PORT:-8080}:80"
     depends_on:
       - backend
+    networks:
+      - itops-net
+
+  # ===========================================================================
+  #  公网后端（员工自助专用）：PUBLIC_ONLY=1，只注册 /api/public
+  #  不映射任何端口，只能被 public-web 通过内部网络访问；
+  #  即使网关被绕过，这个进程里也没有登录/工单/账号/备份等管理接口。
+  # ===========================================================================
+  backend-public:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      TZ: Asia/Shanghai
+      # 关键开关：只开放免登录的报障 / 查进度 / 满意度 / FAQ 接口
+      PUBLIC_ONLY: "1"
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${MYSQL_DATABASE:-itops}
+      DB_USER: ${MYSQL_USER:-itops}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-itops_2026}
+      # 公网门户对外地址，用于 CORS 收口
+      FRONTEND_ORIGIN: ${PUBLIC_ORIGIN:-*}
+      # 实时事件转发：员工报障后由管理进程推给在线运维浏览器（浏览器只连管理端）
+      REALTIME_RELAY_URL: http://backend:3000/api/realtime/publish
+      REALTIME_RELAY_SECRET: ${JWT_SECRET:-change_this_secret_in_prod}
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - itops-net
+
+  # ===========================================================================
+  #  公网网关（唯一对公网暴露的入口）：门户静态页 + /api/public 反代
+  #  /api/auth、/api/tickets、/uploads 等在网关层直接返回 404
+  # ===========================================================================
+  public-web:
+    build:
+      context: ./public-portal
+    restart: unless-stopped
+    ports:
+      # 只有这个端口需要映射到公网（云服务器安全组 / 路由器端口转发）
+      - "${PUBLIC_PORT:-8090}:80"
+    depends_on:
+      - backend-public
     networks:
       - itops-net
 

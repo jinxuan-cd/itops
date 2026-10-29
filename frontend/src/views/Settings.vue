@@ -143,7 +143,10 @@
       <el-tab-pane label="自助服务入口" name="selfservice">
         <div class="set-card">
           <h4 class="it-section-title">员工自助报障 · 常见问题门户</h4>
-          <p class="tip">把下面二维码打印贴到工位、打印机、会议室，员工扫码即可报障，无需登录账号。</p>
+          <p class="tip">
+            员工自助门户已从管理端拆分成<strong>独立公网入口</strong>，与管理后台分端口运行：
+            管理端只在内网访问，门户端口对外开放。把下面二维码打印贴到工位、打印机、会议室，员工扫码即可报障，无需登录账号。
+          </p>
           <el-form label-width="150px" style="max-width:620px">
             <el-form-item label="开启扫码报障">
               <el-switch v-model="ss.report_enable" :disabled="!userStore.isAdmin" @change="saveSs" />
@@ -151,7 +154,21 @@
             <el-form-item label="开启常见问题门户">
               <el-switch v-model="ss.faq_enable" :disabled="!userStore.isAdmin" @change="saveSs" />
             </el-form-item>
+            <el-form-item label="公网门户地址">
+              <el-input v-model="ss.public_base_url" placeholder="如 http://it-report.example.com:8090"
+                :disabled="!userStore.isAdmin" @blur="saveSs" />
+              <div class="tip" style="margin-top:6px;line-height:1.6">
+                填写员工在公网/外网访问自助门户的地址（默认端口 8090）。保存后二维码与链接自动指向该地址。
+              </div>
+            </el-form-item>
           </el-form>
+
+          <el-alert v-if="!isPublicBase" type="warning" :closable="false" show-icon style="margin-bottom:14px"
+            title="尚未配置公网地址，当前二维码指向内网管理端地址，只有连内网才能打开。">
+            <div style="font-size:12.5px;line-height:1.6">
+              分公司或外勤员工扫码会打不开。请填写公网门户地址（如 <code>http://公网IP:8090</code>）。
+            </div>
+          </el-alert>
 
           <div class="qr-wrap" v-if="ss.report_enable">
             <div class="qr-box">
@@ -168,7 +185,10 @@
               <el-input :model-value="faqUrl" readonly size="small">
                 <template #append><el-button @click="copy(faqUrl)">复制</el-button></template>
               </el-input>
-              <div class="qr-tip">入口密钥：<code>{{ ss.report_key }}</code>，泄露后可在下方重置，旧二维码立即失效。</div>
+              <div class="qr-tip">
+                入口密钥：<code>{{ ss.report_key }}</code>，泄露后可在下方重置，旧二维码立即失效。<br>
+                公网门户只开放「报障 / 查进度 / 满意度 / 常见问题」四个接口，不包含任何管理接口。
+              </div>
               <el-button v-if="userStore.isAdmin" size="small" type="danger" plain @click="rotateKey">重置入口密钥</el-button>
             </div>
           </div>
@@ -522,10 +542,14 @@ async function saveInspCfg() {
 }
 
 /* ---------- 自助服务入口 ---------- */
-const ss = reactive({ report_enable: true, faq_enable: true, report_key: '' })
+const ss = reactive({ report_enable: true, faq_enable: true, report_key: '', public_base_url: '' })
 const qrData = ref('')
-const reportUrl = computed(() => (ss.report_key ? `${location.origin}/report?k=${ss.report_key}` : ''))
-const faqUrl = computed(() => (ss.report_key ? `${location.origin}/faq?k=${ss.report_key}` : `${location.origin}/faq`))
+// 员工自助门户与管理端已分离：二维码必须指向**公网门户地址**，
+// 未配置时退回当前访问地址（仅内网可用，适合还没开放公网时的内部试用）
+const pubBase = computed(() => (ss.public_base_url || location.origin).replace(/\/+$/, ''))
+const isPublicBase = computed(() => !!ss.public_base_url)
+const reportUrl = computed(() => (ss.report_key ? `${pubBase.value}/report?k=${ss.report_key}` : ''))
+const faqUrl = computed(() => (ss.report_key ? `${pubBase.value}/faq?k=${ss.report_key}` : `${pubBase.value}/faq`))
 
 async function genQr() {
   qrData.value = ''
@@ -541,14 +565,20 @@ async function loadSs() {
     ss.report_enable = !!c.report_enable
     ss.faq_enable = !!c.faq_enable
     ss.report_key = c.report_key || ''
+    ss.public_base_url = c.public_base_url || ''
     genQr()
   } catch { /* ignore */ }
 }
 
 async function saveSs() {
   try {
-    const c = await R.savePublicSettings({ report_enable: ss.report_enable, faq_enable: ss.faq_enable })
+    const c = await R.savePublicSettings({
+      report_enable: ss.report_enable,
+      faq_enable: ss.faq_enable,
+      public_base_url: ss.public_base_url
+    })
     Object.assign(ss, c)
+    genQr()
     ElMessage.success('已保存')
   } catch (e) {
     ElMessage.error(e.message)

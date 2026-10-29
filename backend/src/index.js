@@ -3,7 +3,7 @@ const express = require('express')
 const cors = require('cors')
 const path = require('path')
 const jwt = require('jsonwebtoken')
-const { query } = require('./db')
+const { query, dbTarget } = require('./db')
 const { fail } = require('./utils/helpers')
 const { seedDefaultUsers, migrateSchema } = require('./utils/seed')
 const { JWT_SECRET } = require('./middleware/auth')
@@ -15,7 +15,7 @@ const { uploadDir, uploadStaticOptions } = require('./middleware/upload')
 //  单个后端进程，同时为两个入口提供 API
 //  ---------------------------------------------------------------------------
 //  · 管理端容器（内网端口，默认 8080）：完整后台，可访问全部接口
-//  · 员工自助容器（公网端口，默认 8090）：只有报障/查进度/满意度/FAQ 页面，
+//  · 员工自助容器（公网端口，默认 8081）：只有报障/查进度/满意度/FAQ 页面，
 //    nginx 只把 /api/public/* 反代到这里，其余路径在网关层就是 404
 //  两个入口连的是**同一个 backend、同一个数据库**，数据天然互通，不需要任何同步。
 //  公网安全边界由「网关只放行 /api/public/」+「宝塔 WAF」共同保证。
@@ -89,15 +89,26 @@ app.use((err, req, res, next) => {
   fail(res, err.message || '服务器内部错误', 1, 500)
 })
 
-// 等待 MySQL 就绪（Docker 中 db 容器已启动但可能尚未接受连接）
-async function waitForDb(retries = 30, interval = 2000) {
+// 等待数据库就绪（Docker 中 db 容器已启动但可能仍在初始化，MariaDB 首次初始化约 10~30 秒）
+async function waitForDb(retries = 40, interval = 3000) {
+  // 口令错误重试再多次也没用，直接给出可操作的提示后退出
+  const AUTH_ERRORS = new Set(['ER_ACCESS_DENIED_ERROR', 'ER_DBACCESS_DENIED_ERROR'])
   for (let i = 0; i < retries; i++) {
     try {
       await query('SELECT 1')
-      console.log('[db] MySQL 连接成功')
+      console.log(`[db] 数据库连接成功：${dbTarget()}`)
       return true
     } catch (e) {
-      console.log(`[db] MySQL 尚未就绪，第 ${i + 1}/${retries} 次重试：${e.message}`)
+      if (AUTH_ERRORS.has(e.code)) {
+        console.error(`[db] 账号或口令被拒绝（${e.code}）：${dbTarget()}`)
+        console.error('[db] 原因是数据库里的真实口令与 .env 里的 MYSQL_USER / MYSQL_PASSWORD 不一致（数据卷已初始化过，改 env 不会改库里的口令）。')
+        console.error('[db] 三种处理方式：')
+        console.error('[db]   1) 把 .env 改回当初初始化时用的口令，再 up -d --force-recreate')
+        console.error('[db]   2) 进容器改口令：docker compose exec db mariadb -uroot -p 后执行 ALTER USER')
+        console.error('[db]   3) 数据可丢弃时删卷重建：docker compose down -v && docker compose up -d --build')
+        process.exit(1)
+      }
+      console.log(`[db] 数据库尚未就绪，第 ${i + 1}/${retries} 次重试（${dbTarget()}）：${e.code || e.message}`)
       await new Promise((r) => setTimeout(r, interval))
     }
   }
@@ -115,7 +126,7 @@ async function start() {
       console.error('[seed] 初始化失败：', e.message)
     }
   } else {
-    console.error('[db] 多次重试仍无法连接 MySQL，已跳过 seed；请检查数据库配置后重启后端')
+    console.error('[db] 多次重试仍无法连接数据库，已跳过 seed；请检查数据库配置后重启后端')
   }
 
   app.listen(PORT, () => {

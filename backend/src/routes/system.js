@@ -8,9 +8,9 @@ const { settingGet, settingSet, ensurePublicSettings } = require('../utils/seed'
 router.use(auth)
 
 // 公网门户地址规范化：允许填 IP、域名、带端口，可不写协议
-//   example.com:8090              -> http://example.com:8090
+//   example.com:8081              -> http://example.com:8081
 //   https://it.example.com/       -> https://it.example.com
-//   http://1.2.3.4:8090/report    -> http://1.2.3.4:8090   （只保留到端口，路径丢掉）
+//   http://1.2.3.4:8081/report    -> http://1.2.3.4:8081   （只保留到端口，路径丢掉）
 function normalizeBaseUrl(raw) {
   let s = String(raw || '').trim()
   if (!s) return ''
@@ -30,7 +30,7 @@ async function readPublicSettings() {
     report_enable: ps.report_enable,
     faq_enable: ps.faq_enable,
     report_key: ps.key,
-    // 员工自助门户的公网地址，例如 http://it-report.example.com:8090
+    // 员工自助门户的公网地址，例如 http://it-report.example.com:8081
     public_base_url: (await settingGet('public_base_url')) || ''
   }
 }
@@ -48,7 +48,7 @@ router.put('/public-settings', adminOnly, asyncHandler(async (req, res) => {
     const raw = String(b.public_base_url || '').trim()
     const norm = normalizeBaseUrl(raw)
     // 填了但解析不出来，直接报错，避免存进空值后二维码指回内网地址
-    if (raw && !norm) return fail(res, '公网门户地址格式不正确，请填写如 http://your-domain.com:8090')
+    if (raw && !norm) return fail(res, '公网门户地址格式不正确，请填写如 http://your-domain.com:8081')
     await settingSet('public_base_url', norm)
   }
   if (b.rotate) {

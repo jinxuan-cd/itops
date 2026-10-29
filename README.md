@@ -8,13 +8,13 @@
   <img alt="license" src="https://img.shields.io/badge/license-MIT-blue.svg">
   <img alt="node" src="https://img.shields.io/badge/node-%E2%89%A520.x-brightgreen.svg">
   <img alt="vue" src="https://img.shields.io/badge/vue-3.x-42b883.svg">
-  <img alt="mysql" src="https://img.shields.io/badge/mysql-8.0-4479A1.svg">
+  <img alt="mariadb" src="https://img.shields.io/badge/mariadb-10.11-003545.svg">
   <img alt="docker" src="https://img.shields.io/badge/docker-compose-2496ED.svg">
 </p>
 
 - **开发者**：锦轩
 - **开源协议**：[MIT](./LICENSE)
-- **运行环境**：Linux / Windows + Docker 20.10+，或 Node.js 20+ / MySQL 8.0
+- **运行环境**：Linux / Windows + Docker 20.10+，或 Node.js 20+ / MariaDB 10.11（MySQL 8.0 亦可）
 
 ---
 
@@ -30,6 +30,7 @@
 - [核心联动逻辑](#核心联动逻辑)
 - [数据口径说明](#数据口径说明)
 - [公网 / 内网双入口隔离](#公网--内网双入口隔离)
+- [数据库：MariaDB 10.11 与迁移](#数据库mariadb-1011-与迁移)
 - [自助入口与移动端](#自助入口与移动端)
 - [实时消息说明](#实时消息说明)
 - [数据备份与恢复](#数据备份与恢复)
@@ -114,7 +115,7 @@
 
 ### 平台能力
 
-- **公网内网双入口**：员工自助门户独立端口（默认 8090），管理后台独立端口（默认 8080）。两个端口连的是**同一个后端、同一个数据库**，数据完全互通；公网端口只放行 4 个免登录接口，登录与管理接口在该端口上直接 404。
+- **公网内网双入口**：员工自助门户独立端口（默认 8081），管理后台独立端口（默认 8080）。两个端口连的是**同一个后端、同一个数据库**，数据完全互通；公网端口只放行 4 个免登录接口，登录与管理接口在该端口上直接 404。
 - **多角色权限**：管理员 / 审计员（全公司只读）/ 服务台 / 运维工程师，写操作按角色收口。
 - **数据隔离**：所有业务表绑定 `user_id`，普通用户只能看到自己的数据。
 - **实时推送**：SSE 长连接，新单/接单/退回/完成即时到达浏览器；员工在公网门户报障后，运维的管理端界面同样实时弹出提醒。
@@ -130,7 +131,7 @@
 | --- | --- |
 | 前端 | Vue 3（`<script setup>`）、Element Plus、Vite、Pinia、Vue Router、ECharts |
 | 后端 | Node.js 20、Express 4、mysql2 连接池、JWT、bcryptjs |
-| 数据库 | MySQL 8.0（InnoDB / utf8mb4 / `+08:00` 时区） |
+| 数据库 | MariaDB 10.11（InnoDB / utf8mb4 / `+08:00` 时区），兼容 MySQL 8.0 |
 | 文件与导出 | Multer 上传、ExcelJS 导出、archiver + adm-zip 备份、pdf-parse / mammoth 文档解析 |
 | 部署 | Docker Compose（db / backend / frontend / public-web），Nginx 托管静态资源并反代 API |
 
@@ -147,7 +148,7 @@ it-ops-system/
 ├── backend/                   # Express 后端（单进程，管理端与门户共用）
 │   ├── src/
 │   │   ├── index.js           # 入口：全部接口 + /api/public 免登录接口
-│   │   ├── db.js              # MySQL 连接池
+│   │   ├── db.js              # 数据库连接池（MariaDB / MySQL 通用）
 │   │   ├── middleware/        # auth 鉴权、upload 上传白名单、audit 审计
 │   │   ├── routes/            # 23 个业务路由（见下表）
 │   │   └── utils/             # 响应封装、SLA、实时推送、调度器、seed、文本清洗
@@ -201,25 +202,25 @@ docker compose logs -f backend
 | 入口 | 地址 | 网络范围 |
 | --- | --- | --- |
 | 管理后台（运维/管理员） | `http://服务器内网IP:8080` | **只在内网**开放 |
-| 员工自助门户（报障/查进度/FAQ） | `http://服务器公网IP:8090` | 可对公网开放 |
+| 员工自助门户（报障/查进度/FAQ） | `http://服务器公网IP:8081` | 可对公网开放 |
 
 > 两个端口连的是**同一个后端、同一个数据库**，报障进来自动出现在管理后台的工单列表，数据不需要任何同步。
-> 门户端口（8090）在网关层只放行 `/api/public/*`，访问 `http://公网IP:8090/api/auth/login`、`/api/tickets`、`/uploads/...` 一律返回 404。
+> 门户端口（8081）在网关层只放行 `/api/public/*`，访问 `http://公网IP:8081/api/auth/login`、`/api/tickets`、`/uploads/...` 一律返回 404。
 > `db` 与 `backend` 不映射宿主机端口，只存在于容器网络内（要本机调试后端，临时在 compose 里加回 `- "127.0.0.1:3000:3000"`）。
-> 入口密钥在后端首次启动时自动生成，登录管理后台后到「系统设置 → 自助服务入口」查看二维码与链接，并把「公网门户地址」填成 `http://公网IP:8090`。
+> 入口密钥在后端首次启动时自动生成，登录管理后台后到「系统设置 → 自助服务入口」查看二维码与链接，并把「公网门户地址」填成 `http://公网IP:8081`。
 
 ### 方式二：本地开发
 
-**前置**：Node.js ≥ 20、本地 MySQL 8.0。
+**前置**：Node.js ≥ 20、本地 MariaDB 10.11 或 MySQL 8.0。
 
 ```bash
 # 1. 建库并初始化
-mysql -uroot -p -e "CREATE DATABASE itops DEFAULT CHARACTER SET utf8mb4"
-mysql -uroot -p itops < sql/init.sql
+mariadb -uroot -p -e "CREATE DATABASE itops DEFAULT CHARACTER SET utf8mb4"
+mariadb -uroot -p itops < sql/init.sql
 
 # 2. 启动后端
 cd backend
-cp .env.example .env        # 按本地 MySQL 修改 DB_* 与 JWT_SECRET
+cp .env.example .env        # 按本地数据库修改 DB_* 与 JWT_SECRET
 npm install
 npm run dev                 # http://localhost:3000
 
@@ -267,7 +268,7 @@ npm run dev:frontend    # 启动前端
 
 | 初始化项 | 状态 |
 | --- | --- |
-| 表结构 | 19 张表 + `v_ticket_duration` 视图，`sql/init.sql` 全量定义 |
+| 表结构 | 18 张表 + `v_ticket_duration` 视图，`sql/init.sql` 全量定义 |
 | 部门 / 应用系统 / 问题类别 | 44 条默认字典（可在「基础字典维护」增改停删） |
 | SLA 策略 | 4 条默认策略（低/普通/高/紧急） |
 | 系统设置 | 报障入口、FAQ 门户、服务台、巡检区域与巡检项默认值 |
@@ -283,7 +284,7 @@ docker compose up -d --build
 
 # 方式 B：保留容器，只重跑初始化脚本
 docker compose exec -T db sh -c \
-  'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" itops' < sql/init.sql
+  'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" itops' < sql/init.sql
 ```
 
 > ⚠️ `docker compose down -v` 会清空数据库与上传文件。执行前请先在「系统设置 → 备份恢复」下载一份备份包。
@@ -338,7 +339,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 | 超期未完成 | 未完成工单按 `NOW() - happen_time` 计算已挂时长，用 `GREATEST(...,0)` 兜底，不会出现负数 |
 | 故障类指标 | 只在有故障记录时展示；无故障时看板与分析页自动隐藏故障卡片 |
 
-> **时区**：容器 MySQL 必须使用 `TZ=Asia/Shanghai` + `--default-time-zone=+08:00`（`docker-compose.yml` 已固定）。
+> **时区**：容器数据库必须使用 `TZ=Asia/Shanghai` + `--default-time-zone=+08:00`（`docker-compose.yml` 已固定）。
 > 若数据库跑在 UTC，`NOW()` 会比北京时间早 8 小时，导致「已挂时长」出现负数、趋势图分桶错位、SLA 超期判定滞后 8 小时。后端计算本地时间统一使用 `todayStr()` / `nowStr()`，不使用 `toISOString()`。
 
 ---
@@ -350,7 +351,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 | | 管理后台 | 员工自助门户 |
 | --- | --- | --- |
-| 默认端口 | `8080` | `8090` |
+| 默认端口 | `8080` | `8081` |
 | 配置项 | `.env` 里的 `ADMIN_PORT` | `.env` 里的 `PUBLIC_PORT` |
 | 面向 | 内网（运维、管理员、审计员） | 公网（全体员工手机扫码） |
 | 界面 | Vue3 完整后台 | 零依赖静态页（约 30KB，弱网秒开） |
@@ -369,7 +370,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 - 严格响应头：`X-Frame-Options: DENY`、`Content-Security-Policy`（只允许自身资源）、`X-Robots-Tag: noindex`、`server_tokens off`。
 - 只暴露必要字段：进度查询不返回处理人名与内部沟通；填过手机号的单必须校验后 4 位才能查看。
 
-**部署要点**：云安全组 / 宝塔 WAF **只**把 `8090` 映射到公网；`8080` 只在局域网可达，不做公网映射。
+**部署要点**：云安全组 / 宝塔 WAF **只**把 `8081` 映射到公网；`8080` 只在局域网可达，不做公网映射。
 
 ### 改端口后不生效？
 
@@ -382,6 +383,90 @@ docker compose up -d --force-recreate
 docker compose ps
 ```
 
+还要确认端口没被别的程序占用（宝塔/1Panel 自己、旧容器都可能占着）：
+
+```bash
+ss -lntp | grep -E ':8080|:8081'     # 应分别对应 frontend / public-web 容器
+```
+
+> 默认端口：**管理端 8080**（只内网）、**员工报障 8081**（对公网开放，宝塔 WAF 反代到这里）。
+
+---
+
+## 数据库：MariaDB 10.11 与迁移
+
+镜像固定为 `mariadb:10.11`（LTS，兼容 MySQL 协议与语法，启动比 MySQL 8.0 更快、内存占用更低）。
+`sql/init.sql` 同时兼容 MariaDB 10.11 与 MySQL 8.0，两份都能直接跑。
+
+### 从 MySQL 8.0 换成 MariaDB（重要）
+
+MariaDB **无法读取** MySQL 8.0 的数据目录，所以换镜像必须换新数据卷（compose 里已改名为 `mariadb_data`，与旧的 `db_data` 分开）。
+系统出厂即为空数据，通常直接重建最省事：
+
+```bash
+cd /opt/it-ops-system
+git pull
+
+# 1. 停掉旧栈（同时清掉旧镜像的容器）
+docker compose down
+
+# 2. 删掉旧的 MySQL 8 数据卷（卷名以 docker volume ls 为准）
+docker volume ls | grep -E 'db_data|itops'
+docker volume rm it-ops-system_db_data        # 确认数据可丢弃再执行
+
+# 3. 重新构建启动：MariaDB 会按 init.sql 全新初始化
+docker compose up -d --build
+docker compose logs -f db | tail -30          # 看到 ready for connections 即成功
+docker compose logs -f backend | tail -20     # 看到「数据库连接成功」+「已创建默认管理员账号」
+```
+
+**如果旧库数据必须保留**（例如已经在用，只是要换镜像），先用旧的 MySQL 8 容器把数据导出来：
+
+```bash
+# ① 单独起旧的 mysql:8.0 容器挂旧卷，并用 --skip-grant-tables 绕过忘记的口令
+docker run -d --name old-mysql -v it-ops-system_db_data:/var/lib/mysql mysql:8.0   --skip-grant-tables --skip-networking=0
+sleep 20
+
+# ② 导出（此时无需口令）
+docker exec old-mysql mysqldump -uroot --single-transaction --routines --triggers   --default-character-set=utf8mb4 itops > /opt/itops-old.sql
+
+# ③ 起新栈（MariaDB 空库初始化），再把数据灌进去
+docker rm -f old-mysql
+docker compose up -d --build
+sleep 30
+docker compose exec -T db sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" itops' < /opt/itops-old.sql
+docker compose restart backend
+```
+
+> 导出文件里如果带 `utf8mb4_0900_ai_ci`（MySQL 8 默认排序规则），导入 MariaDB 前替换成 `utf8mb4_unicode_ci`：
+> `sed -i 's/utf8mb4_0900_ai_ci/utf8mb4_unicode_ci/g' /opt/itops-old.sql`
+
+### 数据库连不上 / 口令被拒绝？
+
+症状：后端日志刷 `Access denied for user 'root'@'localhost'`，或页面登录报 500、`docker compose exec db mariadb -uroot -p...` 提示 `ERROR 1045`。
+
+根因只有一个：**数据卷已经初始化过，库里的真实口令不会再跟着 `.env` 变**。
+`MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` 仅在数据目录为空的第一次启动时生效。
+
+三种处理方式（按代价从低到高）：
+
+```bash
+# 方式 1：把 .env 改回当初初始化时用的口令，然后重建容器
+docker compose up -d --force-recreate
+
+# 方式 2：进容器改口令（数据保留）
+docker compose exec db mariadb -uroot -p        # 用当前能登录的口令
+#   → ALTER USER 'root'@'localhost' IDENTIFIED BY '新口令';
+#   → ALTER USER 'itops'@'%' IDENTIFIED BY '新口令';
+#   → FLUSH PRIVILEGES;
+# 改完把 .env 里的口令同步，再 up -d --force-recreate
+
+# 方式 3：数据可丢弃，删卷重建（最干净）
+docker compose down -v && docker compose up -d --build
+```
+
+后端已内置友好提示：口令被拒绝时会打印连接目标（`itops@db:3306/itops`，不含口令）和上述三种处理方式，不会只丢一句 `ER_ACCESS_DENIED_ERROR`。
+
 ---
 
 ## 自助入口与移动端
@@ -389,7 +474,7 @@ docker compose ps
 - 设置页「自助服务入口」提供二维码与两个免登录链接（指向**公网门户**）：
   - 报障入口：`{公网门户地址}/report?k=<入口密钥>`
   - 常见问题：`{公网门户地址}/faq?k=<入口密钥>`
-- 「公网门户地址」填成 `http://公网IP:8090`（或域名）后，二维码自动改指公网；未填写时会提示「当前二维码只有连内网才能打开」。
+- 「公网门户地址」填成 `http://公网IP:8081`（或域名）后，二维码自动改指公网；未填写时会提示「当前二维码只有连内网才能打开」。
 - 入口密钥保存在 `sys_setting.report_key`，可在设置页一键重置（旧二维码立即失效，需重新打印）。
 - 报障时若填写了手机号，查询进度与评价**必须校验手机号后 4 位**，避免单号被枚举。
 - 报障与 FAQ 接口均有限频，防刷。
@@ -442,7 +527,7 @@ docker compose ps
 
 ### 网络隔离（公网 / 内网）
 
-- 对公网只暴露 **8090**（员工自助门户）；**8080**（管理后台）只在局域网可达。
+- 对公网只暴露 **8081**（员工自助门户）；**8080**（管理后台）只在局域网可达。
 - `db` 与 `backend` 不做任何宿主机端口映射，即使服务器有公网 IP 也连不上数据库与内部 API。
 - 门户 nginx 是唯一对公网开的口子，只放行 `/api/public/*`，其余路径（含 `/api/auth`、`/api/tickets`、`/uploads`）直接 404。
 - 生产建议再叠加：公网门户走 HTTPS（避免报障内容明文）、限制公网侧并发连接数、把管理端访问限制到办公网段（云安全组 / 防火墙白名单 / 宝塔 WAF）。
@@ -494,8 +579,8 @@ AI 能力（智能日报、月度工作报告、知识库整理）按**用户各
 1. **改默认口令**：`admin` 初始密码与 `.env` 中的 `MYSQL_*`、`JWT_SECRET` 全部替换为随机值（`openssl rand -hex 32`）。
 2. **数据持久化**：`db_data` 卷、`backend/uploads`、`backend/backups` 已挂载到宿主机；迁移服务器时整目录拷贝即可。
 3. **开机自启**：三个服务均已配置 `restart: unless-stopped`。
-4. **端口收敛（重要）**：只把 `8090`（员工自助门户）映射到公网；`8080`（管理后台）限内网访问。`db` 与 `backend` 默认不做宿主机映射，不要为了"方便"给它们加公网端口。
-5. **反向代理与 HTTPS**：域名访问时用外层 Nginx / 宝塔 WAF 转发到 `127.0.0.1:8080`（管理端）与 `127.0.0.1:8090`（门户），并为 `/api/realtime/` 保留 `proxy_buffering off` 与较长的 `proxy_read_timeout`。
+4. **端口收敛（重要）**：只把 `8081`（员工自助门户）映射到公网；`8080`（管理后台）限内网访问。`db` 与 `backend` 默认不做宿主机映射，不要为了"方便"给它们加公网端口。
+5. **反向代理与 HTTPS**：域名访问时用外层 Nginx / 宝塔 WAF 转发到 `127.0.0.1:8080`（管理端）与 `127.0.0.1:8081`（门户），并为 `/api/realtime/` 保留 `proxy_buffering off` 与较长的 `proxy_read_timeout`。
 6. **定时备份**：同时开启「系统设置 → 备份恢复」的 zip 备份与服务器 crontab，并定期把备份包拷贝到别的机器。
 7. **日志与监控**：`docker compose logs -f backend`，或接入宿主机日志收集；内置调度器会在每日固定时间推送提醒，可用作存活探测。
 
@@ -584,7 +669,7 @@ query('UPDATE sys_user SET password=? WHERE username=?',[b.hashSync('新密码',
 入口密钥被重置了。到「系统设置 → 自助服务入口」重新获取链接并重新打印二维码。
 
 **Q10：能改成公网访问吗？**
-能。系统本身就是按「内网管理 + 公网自助」设计的：只把 `8090` 通过安全组 / 宝塔 WAF 开放到公网，`8080` 保持内网；公网地址填到「系统设置 → 自助服务入口」的公网门户地址里，二维码会自动指向它。管理端不要直接暴露公网。
+能。系统本身就是按「内网管理 + 公网自助」设计的：只把 `8081` 通过安全组 / 宝塔 WAF 开放到公网，`8080` 保持内网；公网地址填到「系统设置 → 自助服务入口」的公网门户地址里，二维码会自动指向它。管理端不要直接暴露公网。
 
 **Q11：改了 `.env` 里的端口为什么不生效？**
 端口映射只在创建容器时生效。改完执行 `docker compose up -d --force-recreate`（`restart` 不会重建容器），再用 `docker compose ps` 确认。另外确认 `.env` 与 `docker-compose.yml` 在**同一目录**，变量名必须是 `ADMIN_PORT` / `PUBLIC_PORT`。
@@ -599,13 +684,26 @@ query('UPDATE sys_user SET password=? WHERE username=?',[b.hashSync('新密码',
 
 ## 更新日志
 
+### v1.2.0
+
+**数据库换成 MariaDB 10.11，端口改为 8080 / 8081**
+
+- 数据库镜像由 `mysql:8.0` 改为 `mariadb:10.11`（LTS）：启动更快、内存占用更低，协议与语法兼容 MySQL。
+- 数据卷改名为 `mariadb_data`，与旧的 MySQL 8 卷隔离，避免 MariaDB 读到不兼容的数据目录。
+- `sql/init.sql` 去掉 `CREATE USER ... IDENTIFIED WITH mysql_native_password`（MariaDB 不认这套语法），
+  账号统一由容器入口按 env 创建；脚本在 MariaDB 10.11 与 MySQL 8.0 上均可重复执行。
+- 默认端口调整为：管理端 **8080**、员工报障门户 **8081**；端口全部由 `.env` 的 `ADMIN_PORT` / `PUBLIC_PORT` 控制。
+- 后端连接数据库失败时给出可操作的诊断：打印连接目标（不含口令）、判定口令错误后直接说明三种处理方式。
+- 数据库连接池增加 `connectTimeout` 与 `keepAlive`，避免容器休眠后首个请求超时。
+- README 新增「数据库：MariaDB 10.11 与迁移」章节：换镜像步骤、旧数据导出、口令被拒绝的三种解法。
+
 ### v1.1.0
 
 **架构：员工自助与管理后台分端口**
 
 - 新增 `public-portal`：零依赖静态门户（报障 / 查进度 / 满意度评价 / 常见问题），手机优先，约 30KB。
 - 新增 `public-web` 容器：公网入口，只反代 `/api/public/*`，其余路径 404，并加严格响应头与按 IP 限流。
-- 端口划分：管理后台 `8080`（内网）、员工门户 `8090`（公网），端口由 `.env` 的 `ADMIN_PORT` / `PUBLIC_PORT` 控制。
+- 端口划分：管理后台 `8080`（内网）、员工门户 `8081`（公网），端口由 `.env` 的 `ADMIN_PORT` / `PUBLIC_PORT` 控制。
 - 两个端口共用**同一个 `backend` 与同一个数据库**，报障数据实时出现在管理端，无同步延迟；`db` / `backend` 不再映射宿主机端口。
 - 设置页新增「公网门户地址」，可填域名或 IP，保存后二维码与链接立即指向公网门户。
 - 修复：既有数据卷升级时 `report_key` / 开关缺失，导致二维码不生成、员工端打不开——改为请求时自动补齐。

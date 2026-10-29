@@ -6,6 +6,9 @@
 --  执行：mysql -uroot -p itops < sql/init.sql
 --  说明：脚本幂等（CREATE TABLE IF NOT EXISTS / INSERT IGNORE），
 --        可重复执行，不会清空已有业务数据。
+--  兼容：MySQL 8.0 与 MariaDB 10.11 均可直接执行
+--        （本脚本不使用 mysql_native_password / caching_sha2_password 等
+--          数据库专有的建用户语法，账号由 Docker 入口按 env 自动创建）
 --  开发者：锦轩
 -- =============================================================================
 
@@ -14,9 +17,18 @@ SET FOREIGN_KEY_CHECKS = 0;
 SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';
 
 -- =============================================================================
---  一、系统基础表
+--  说明：数据库账号与库由容器入口脚本根据环境变量自动创建
+--        （MARIADB_ROOT_PASSWORD / MARIADB_DATABASE / MARIADB_USER / MARIADB_PASSWORD）。
+--        此处刻意不再写 CREATE USER / GRANT：
+--        · MySQL 8 用 IDENTIFIED WITH mysql_native_password，MariaDB 不认这套语法；
+--        · 而且入口脚本已按 env 建好账号，重复建会与 env 口令不一致，导致后端连不上库。
+--        手工执行本脚本时，请先自行建库并授权：
+--          CREATE DATABASE IF NOT EXISTS itops DEFAULT CHARSET utf8mb4;
 -- =============================================================================
 
+-- =============================================================================
+--  一、系统基础表
+-- =============================================================================
 -- -----------------------------------------------------------------------------
 -- 1. 用户表（登录账号 + 角色权限）
 --    角色：admin 管理员 / auditor 审计员（全公司只读）/ service 服务台 / user 运维工程师

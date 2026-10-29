@@ -1,6 +1,6 @@
 {
   "name": "it-ops-system",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "IT 运维工单台账与日报自动管理系统（私有化部署）",
   "private": true,
   "scripts": {

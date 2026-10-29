@@ -3,9 +3,9 @@
 #  -----------------------------------------------------------------------------
 #  三个容器，两个对外端口：
 #    frontend   管理端（内网）  -> ${ADMIN_PORT:-8080}    完整后台，登录后使用
-#    public-web 员工自助（公网）-> ${PUBLIC_PORT:-8090}   只有报障/查询/常见问题
+#    public-web 员工自助（公网）-> ${PUBLIC_PORT:-8081}   只有报障/查询/常见问题
 #    backend    后端 API        -> 不映射宿主机端口，两个前端容器共用
-#    db         MySQL           -> 不映射宿主机端口，只在容器网络内可见
+#    db         MariaDB 10.11   -> 不映射宿主机端口，只在容器网络内可见
 #
 #  两个前端入口反代的是同一个 backend、同一个数据库，数据天然互通，
 #  不需要任何同步或桥接。公网端口只放行 /api/public/*，其余路径直接 404。
@@ -17,25 +17,31 @@
 
 services:
   db:
-    image: mysql:8.0
+    # MariaDB 10.11（LTS）：与 MySQL 协议/语法高度兼容，初始化更快、资源占用更低
+    # ⚠ MariaDB 读不了 MySQL 8.0 的数据目录，切换镜像必须换新数据卷（见文件末尾 volumes）
+    image: mariadb:10.11
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-itops_root_2026}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-itops}
-      MYSQL_USER: ${MYSQL_USER:-itops}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-itops_2026}
+      # 镜像内的变量名是 MARIADB_*；右侧仍读 .env 里的 MYSQL_*，老 .env 不用改
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-itops_root_2026}
+      MARIADB_DATABASE: ${MYSQL_DATABASE:-itops}
+      MARIADB_USER: ${MYSQL_USER:-itops}
+      MARIADB_PASSWORD: ${MYSQL_PASSWORD:-itops_2026}
       # 时区必须与业务本地时间一致，否则 NOW() 与工单时间差 8 小时（会出现「已挂 -7h」的怪值）
       TZ: Asia/Shanghai
     # 服务器默认时区固定为东八区：NOW()/CURDATE() 全部按北京时间
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-time-zone=+08:00
     volumes:
-      - db_data:/var/lib/mysql
+      - mariadb_data:/var/lib/mysql
+      # 只在数据卷为空（首次启动）时执行；已存在数据时不会覆盖
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-itops_root_2026}"]
+      # 用 env 里的 root 口令探活，避免 MariaDB 下 mysqladmin 空口令探测失败
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -uroot -p\"$$MARIADB_ROOT_PASSWORD\" --silent"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 30s
     networks:
       - itops-net
 
@@ -99,14 +105,16 @@ services:
     restart: unless-stopped
     ports:
       # 只有这个端口需要映射到公网（云服务器安全组 / 路由器端口转发）
-      - "${PUBLIC_PORT:-8090}:80"
+      - "${PUBLIC_PORT:-8081}:80"
     depends_on:
       - backend
     networks:
       - itops-net
 
 volumes:
-  db_data:
+  # 数据卷名固定为 mariadb_data：与之前的 MySQL 8.0 卷（db_data）完全分开，
+  # 切换镜像后不会被旧数据目录污染，首次启动会按 init.sql 全新初始化。
+  mariadb_data:
 
 networks:
   itops-net:

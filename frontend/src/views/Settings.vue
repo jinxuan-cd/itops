@@ -156,12 +156,12 @@
             </el-form-item>
             <el-form-item label="公网门户地址">
               <div style="display:flex;gap:8px;width:100%;max-width:560px">
-                <el-input v-model="ss.public_base_url" placeholder="如 http://it-report.example.com:8090"
+                <el-input v-model="ss.public_base_url" placeholder="如 http://it-report.example.com:8081"
                   :disabled="!userStore.isAdmin" clearable @keyup.enter="saveBase" />
                 <el-button v-if="userStore.isAdmin" type="primary" :loading="ssSaving" @click="saveBase">保存</el-button>
               </div>
               <div class="tip" style="margin-top:6px;line-height:1.6">
-                员工在外网访问自助门户的地址，填<strong>域名或公网 IP</strong>都可以，端口填员工门户端口（默认 8090）。
+                员工在外网访问自助门户的地址，填<strong>域名或公网 IP</strong>都可以，端口填员工门户端口（默认 8081）。
               </div>
             </el-form-item>
           </el-form>
@@ -169,7 +169,7 @@
           <el-alert v-if="!isPublicBase" type="warning" :closable="false" show-icon style="margin-bottom:14px"
             title="尚未配置公网门户地址，二维码暂时指向当前内网地址，外网/分公司员工扫码打不开。">
             <div style="font-size:12.5px;line-height:1.6">
-              在上面填好地址（如 <code>http://公网IP:8090</code>）后点「保存」，二维码会立即改指向公网门户；内网访问不受影响。
+              在上面填好地址（如 <code>http://公网IP:8081</code>）后点「保存」，二维码会立即改指向公网门户；内网访问不受影响。
             </div>
           </el-alert>
 

@@ -4,7 +4,7 @@ const express = require('express')
 const router = express.Router()
 const { query } = require('../db')
 const { ok, fail, asyncHandler, safeJson } = require('../utils/helpers')
-const { settingGet } = require('../utils/seed')
+const { ensurePublicSettings } = require('../utils/seed')
 const { applySla } = require('../utils/sla')
 const { broadcast } = require('../utils/notifier')
 const { dispatchTicket } = require('../utils/dispatch')
@@ -47,12 +47,12 @@ async function nextReportNo() {
 
 // 公开配置：前端据此决定页面是否可用
 router.get('/config', asyncHandler(async (req, res) => {
-  const [rk, re, fe] = [await settingGet('report_key'), await settingGet('report_enable'), await settingGet('faq_enable')]
+  const ps = await ensurePublicSettings()
   ok(res, {
-    report_enable: re === '1',
-    faq_enable: fe === '1',
-    has_key: !!rk,
-    key_ok: req.query.k ? req.query.k === rk : false
+    report_enable: ps.report_enable,
+    faq_enable: ps.faq_enable,
+    has_key: !!ps.key,
+    key_ok: req.query.k ? req.query.k === ps.key : false
   })
 }))
 
@@ -68,10 +68,9 @@ router.get('/options', asyncHandler(async (req, res) => {
 
 // ---- 扫码报障提交 ----
 router.post('/report', asyncHandler(async (req, res) => {
-  const enable = await settingGet('report_enable')
-  if (enable !== '1') return fail(res, '自助报障入口暂未开放，请联系 IT')
-  const key = await settingGet('report_key')
-  if (!key || req.body.k !== key) return fail(res, '报障入口校验失败，请重新扫描二维码')
+  const ps = await ensurePublicSettings()
+  if (!ps.report_enable) return fail(res, '自助报障入口暂未开放，请联系 IT')
+  if (!req.body.k || req.body.k !== ps.key) return fail(res, '报障入口校验失败，请重新扫描二维码')
   if (!rateLimit('report:' + clientIp(req), 12)) return fail(res, '提交过于频繁，请稍后再试')
 
   const b = req.body
@@ -168,11 +167,10 @@ router.post('/satisfy', asyncHandler(async (req, res) => {
 
 // ---- 常见问题自助门户（公开知识）----
 router.get('/faq', asyncHandler(async (req, res) => {
-  const enable = await settingGet('faq_enable')
-  if (enable !== '1') return ok(res, { enable: false, list: [], total: 0 })
+  const ps = await ensurePublicSettings()
+  if (!ps.faq_enable) return ok(res, { enable: false, list: [], total: 0 })
   // 入口密钥校验：与扫码报障共用同一个 key，避免门户被外部随意翻看
-  const rk = await settingGet('report_key')
-  if (!rk || req.query.k !== rk) return ok(res, { enable: true, need_key: true, list: [], total: 0 })
+  if (req.query.k !== ps.key) return ok(res, { enable: true, need_key: true, list: [], total: 0 })
   const kw = String(req.query.keyword || '').trim()
   const where = ['is_public = 1']
   const params = []
@@ -189,10 +187,9 @@ router.get('/faq', asyncHandler(async (req, res) => {
 }))
 
 router.get('/faq/:id', asyncHandler(async (req, res) => {
-  const enable = await settingGet('faq_enable')
-  if (enable !== '1') return fail(res, '自助门户未开放')
-  const rk = await settingGet('report_key')
-  if (!rk || req.query.k !== rk) return fail(res, '入口校验失败，请通过内部链接或二维码访问')
+  const ps = await ensurePublicSettings()
+  if (!ps.faq_enable) return fail(res, '自助门户未开放')
+  if (req.query.k !== ps.key) return fail(res, '入口校验失败，请通过内部链接或二维码访问')
   const rows = await query(
     'SELECT kb_id, app_system, problem_type, problem_summary, solution, keyword, attachment FROM knowledge WHERE kb_id = ? AND is_public = 1',
     [req.params.id]

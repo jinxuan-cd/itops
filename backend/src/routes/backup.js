@@ -23,8 +23,20 @@ const BACKUP_DIR = path.resolve(process.env.BACKUP_DIR || './backups')
 const TMP_DIR = path.join(BACKUP_DIR, 'tmp')
 const KEEP = 20 // 服务端最多保留最近 20 个备份包
 
-fs.mkdirSync(UPLOAD_DIR, { recursive: true })
-fs.mkdirSync(TMP_DIR, { recursive: true })
+// 目录准备：容器里可能是只读挂载或宿主机目录权限不对，
+// 这里绝不能抛异常——否则整个备份路由模块加载失败，设置页会直接 500。
+let dirError = ''
+try {
+  fs.mkdirSync(TMP_DIR, { recursive: true })
+} catch (e) {
+  dirError = `无法创建备份目录 ${TMP_DIR}：${e.message}`
+  console.error('[backup]', dirError)
+}
+try {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true })
+} catch (e) {
+  console.error('[backup] 无法创建上传目录：', e.message)
+}
 
 // 上传的备份包先落到临时目录（最大 1GB），校验完再处理
 const zipUpload = multer({ dest: TMP_DIR, limits: { fileSize: 1024 * 1024 * 1024 } })
@@ -256,20 +268,28 @@ async function restoreFromZipObject(zip) {
 // 概览：表条数、库体积、附件体积、服务端备份目录
 router.get('/info', asyncHandler(async (req, res) => {
   const out = {}
-  for (const t of await listTables()) {
-    try {
-      const r = await query(`SELECT COUNT(*) AS c FROM \`${t}\``)
-      out[t] = Number(r[0].c || 0)
-    } catch { out[t] = 0 }
+  try {
+    for (const t of await listTables()) {
+      try {
+        const r = await query(`SELECT COUNT(*) AS c FROM \`${t}\``)
+        out[t] = Number(r[0].c || 0)
+      } catch { out[t] = 0 }
+    }
+  } catch (e) {
+    console.error('[backup] 统计表条数失败：', e.message)
   }
-  const size = await query(
-    `SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS mb
-     FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()`
-  )
+  let dbMb = 0
+  try {
+    const size = await query(
+      `SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS mb
+       FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()`
+    )
+    dbMb = Number((size[0] && size[0].mb) || 0)
+  } catch { /* 忽略，页面显示 0 即可 */ }
   const up = dirSize(UPLOAD_DIR)
   ok(res, {
     tables: out,
-    db_size_mb: Number((size[0] && size[0].mb) || 0),
+    db_size_mb: dbMb,
     uploads_files: up.files,
     uploads_mb: mb(up.bytes),
     backup_dir: BACKUP_DIR,
@@ -284,18 +304,34 @@ router.post('/create', asyncHandler(async (req, res) => {
 }))
 
 // 服务端备份列表
+// 注意：这个接口在设置页一打开就会调用，**任何情况下都不能 500**，
+// 否则用户看到的就是「读取备份列表失败 + status code 500」。
+// 目录不存在 / 权限不足 / 单个文件 stat 失败，都降级为「空列表 + 提示原因」。
 router.get('/list', asyncHandler(async (req, res) => {
-  let files = []
+  const files = []
+  let warn = dirError
   try {
-    files = fs.readdirSync(BACKUP_DIR)
-      .filter(f => /^itops-backup-[0-9-]+\.zip$/.test(f))
-      .map(f => {
+    const names = fs.readdirSync(BACKUP_DIR)
+    for (const f of names) {
+      if (!/^itops-backup-[0-9-]+\.zip$/.test(f)) continue
+      try {
         const st = fs.statSync(path.join(BACKUP_DIR, f))
-        return { name: f, size: st.size, size_mb: mb(st.size), created_at: st.mtime.toISOString() }
-      })
-      .sort((a, b) => (a.name < b.name ? 1 : -1))
-  } catch { /* ignore */ }
-  ok(res, { dir: BACKUP_DIR, keep: KEEP, files })
+        files.push({ name: f, size: st.size, size_mb: mb(st.size), created_at: st.mtime.toISOString() })
+      } catch { /* 单个文件读不到就跳过，不影响整份列表 */ }
+    }
+    files.sort((a, b) => (a.name < b.name ? 1 : -1))
+  } catch (e) {
+    // 常见于：宿主机 backups 目录没建、权限是 root、容器以非 root 运行
+    warn = warn || `无法读取备份目录 ${BACKUP_DIR}：${e.code || e.message}`
+    console.error('[backup] 读取备份目录失败：', e.message)
+  }
+  ok(res, {
+    dir: BACKUP_DIR,
+    keep: KEEP,
+    files,
+    // warn 非空时前端会提示，但仍能正常显示页面
+    warn: warn || ''
+  })
 }))
 
 // 下载某个备份包

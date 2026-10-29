@@ -155,39 +155,44 @@
               <el-switch v-model="ss.faq_enable" :disabled="!userStore.isAdmin" @change="saveSs" />
             </el-form-item>
             <el-form-item label="公网门户地址">
-              <el-input v-model="ss.public_base_url" placeholder="如 http://it-report.example.com:8090"
-                :disabled="!userStore.isAdmin" @blur="saveSs" />
+              <div style="display:flex;gap:8px;width:100%;max-width:560px">
+                <el-input v-model="ss.public_base_url" placeholder="如 http://it-report.example.com:8090"
+                  :disabled="!userStore.isAdmin" clearable @keyup.enter="saveBase" />
+                <el-button v-if="userStore.isAdmin" type="primary" :loading="ssSaving" @click="saveBase">保存</el-button>
+              </div>
               <div class="tip" style="margin-top:6px;line-height:1.6">
-                填写员工在公网/外网访问自助门户的地址（默认端口 8090）。保存后二维码与链接自动指向该地址。
+                员工在外网访问自助门户的地址，填<strong>域名或公网 IP</strong>都可以，端口填员工门户端口（默认 8090）。
               </div>
             </el-form-item>
           </el-form>
 
           <el-alert v-if="!isPublicBase" type="warning" :closable="false" show-icon style="margin-bottom:14px"
-            title="尚未配置公网地址，当前二维码指向内网管理端地址，只有连内网才能打开。">
+            title="尚未配置公网门户地址，二维码暂时指向当前内网地址，外网/分公司员工扫码打不开。">
             <div style="font-size:12.5px;line-height:1.6">
-              分公司或外勤员工扫码会打不开。请填写公网门户地址（如 <code>http://公网IP:8090</code>）。
+              在上面填好地址（如 <code>http://公网IP:8090</code>）后点「保存」，二维码会立即改指向公网门户；内网访问不受影响。
             </div>
           </el-alert>
 
           <div class="qr-wrap" v-if="ss.report_enable">
             <div class="qr-box">
               <img v-if="qrData" :src="qrData" class="qr-img" alt="报障二维码" />
-              <div v-else class="qr-loading">二维码生成中…</div>
+              <div v-else class="qr-loading">{{ qrErr || '二维码生成中…' }}</div>
               <div class="qr-cap">扫码报障</div>
             </div>
             <div class="qr-info">
               <div class="qr-line"><span>报障链接</span></div>
-              <el-input :model-value="reportUrl" readonly size="small">
+              <el-input v-if="reportUrl" :model-value="reportUrl" readonly size="small">
                 <template #append><el-button @click="copy(reportUrl)">复制</el-button></template>
               </el-input>
+              <div v-else class="tip">入口密钥缺失，无法生成链接</div>
               <div class="qr-line" style="margin-top:12px"><span>常见问题链接</span></div>
-              <el-input :model-value="faqUrl" readonly size="small">
+              <el-input v-if="faqUrl" :model-value="faqUrl" readonly size="small">
                 <template #append><el-button @click="copy(faqUrl)">复制</el-button></template>
               </el-input>
+              <div v-else class="tip">入口密钥缺失，无法生成链接</div>
               <div class="qr-tip">
-                入口密钥：<code>{{ ss.report_key }}</code>，泄露后可在下方重置，旧二维码立即失效。<br>
-                公网门户只开放「报障 / 查进度 / 满意度 / 常见问题」四个接口，不包含任何管理接口。
+                入口密钥：<code>{{ ss.report_key || '—' }}</code>，泄露后可在下方重置，旧二维码立即失效。<br>
+                门户端口只开放「报障 / 查进度 / 满意度 / 常见问题」，不包含任何管理接口。
               </div>
               <el-button v-if="userStore.isAdmin" size="small" type="danger" plain @click="rotateKey">重置入口密钥</el-button>
             </div>
@@ -426,7 +431,7 @@ async function saveProfile() {
     // 同步写回 localStorage，否则刷新后右上角又变回旧姓名
     userStore.patchUser({ real_name: data.real_name })
     ElMessage.success('个人信息已更新')
-  } catch (e) { ElMessage.error(e.message) } finally { savingProfile.value = false }
+  } catch (e) { ElMessage.error(e.__message || e.message) } finally { savingProfile.value = false }
 }
 
 async function savePassword() {
@@ -439,7 +444,7 @@ async function savePassword() {
     ElMessage.success(res || '密码已修改，请重新登录')
     userStore.logout()
     setTimeout(() => location.reload(), 800)
-  } catch (e) { ElMessage.error(e.message) } finally { savingPwd.value = false }
+  } catch (e) { ElMessage.error(e.__message || e.message) } finally { savingPwd.value = false }
 }
 
 function pickTheme(color) {
@@ -494,7 +499,7 @@ async function saveNotifyCfg() {
       is_enable: notify.is_enable
     })
     ElMessage.success('推送配置已保存')
-  } catch (e) { ElMessage.error(e.message) } finally { notifySaving.value = false }
+  } catch (e) { ElMessage.error(e.__message || e.message) } finally { notifySaving.value = false }
 }
 
 async function testNotifyCfg() {
@@ -503,7 +508,7 @@ async function testNotifyCfg() {
   try {
     await R.testNotify({ channel: notify.channel, webhook: notify.webhook })
     ElMessage.success('测试消息已发送，请查看群消息')
-  } catch (e) { ElMessage.error(e.message) } finally { notifyTesting.value = false }
+  } catch (e) { ElMessage.error(e.__message || e.message) } finally { notifyTesting.value = false }
 }
 
 /* ---------- 巡检设置 ---------- */
@@ -538,25 +543,35 @@ async function saveInspCfg() {
     const c = await R.saveInspectionConfig({ areas: inspCfg.areas, items })
     inspCfg.areas = c.areas; inspCfg.items = c.items
     ElMessage.success('巡检设置已保存')
-  } catch (e) { ElMessage.error(e.message) } finally { inspSaving.value = false }
+  } catch (e) { ElMessage.error(e.__message || e.message) } finally { inspSaving.value = false }
 }
 
 /* ---------- 自助服务入口 ---------- */
 const ss = reactive({ report_enable: true, faq_enable: true, report_key: '', public_base_url: '' })
 const qrData = ref('')
+const qrErr = ref('')
+const ssSaving = ref(false)
 // 员工自助门户与管理端已分离：二维码必须指向**公网门户地址**，
 // 未配置时退回当前访问地址（仅内网可用，适合还没开放公网时的内部试用）
 const pubBase = computed(() => (ss.public_base_url || location.origin).replace(/\/+$/, ''))
 const isPublicBase = computed(() => !!ss.public_base_url)
 const reportUrl = computed(() => (ss.report_key ? `${pubBase.value}/report?k=${ss.report_key}` : ''))
-const faqUrl = computed(() => (ss.report_key ? `${pubBase.value}/faq?k=${ss.report_key}` : `${pubBase.value}/faq`))
+const faqUrl = computed(() => (ss.report_key ? `${pubBase.value}/faq?k=${ss.report_key}` : ''))
 
 async function genQr() {
   qrData.value = ''
-  if (!reportUrl.value) return
+  qrErr.value = ''
+  if (!ss.report_key) {
+    qrErr.value = '缺少入口密钥，点下方「重置入口密钥」重新生成'
+    return
+  }
   try {
-    qrData.value = await QRCode.toDataURL(reportUrl.value, { width: 260, margin: 1, color: { dark: '#1f2a44', light: '#ffffff' } })
-  } catch { /* ignore */ }
+    qrData.value = await QRCode.toDataURL(reportUrl.value, {
+      width: 260, margin: 1, color: { dark: '#1f2a44', light: '#ffffff' }
+    })
+  } catch (e) {
+    qrErr.value = '二维码生成失败：' + (e.message || e)
+  }
 }
 
 async function loadSs() {
@@ -567,23 +582,32 @@ async function loadSs() {
     ss.report_key = c.report_key || ''
     ss.public_base_url = c.public_base_url || ''
     genQr()
-  } catch { /* ignore */ }
+  } catch (e) { ElMessage.error('读取自助入口配置失败：' + (e.__message || e.message)) }
 }
 
-async function saveSs() {
+// 只提交传入的字段，避免「正在输入公网地址时点开关」把半截地址存进去
+async function submitSs(patch) {
+  if (!userStore.isAdmin) return
+  ssSaving.value = true
   try {
-    const c = await R.savePublicSettings({
-      report_enable: ss.report_enable,
-      faq_enable: ss.faq_enable,
-      public_base_url: ss.public_base_url
-    })
+    const c = await R.savePublicSettings(patch)
     Object.assign(ss, c)
     genQr()
     ElMessage.success('已保存')
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(e.__message || e.message)
     loadSs()
+  } finally {
+    ssSaving.value = false
   }
+}
+
+function saveSs() {
+  return submitSs({ report_enable: ss.report_enable, faq_enable: ss.faq_enable })
+}
+
+function saveBase() {
+  return submitSs({ public_base_url: ss.public_base_url })
 }
 
 async function rotateKey() {
@@ -595,7 +619,7 @@ async function rotateKey() {
     Object.assign(ss, c)
     genQr()
     ElMessage.success('已重置入口密钥')
-  } catch (e) { ElMessage.error(e.message) }
+  } catch (e) { ElMessage.error(e.__message || e.message) }
 }
 
 function copy(text) {
@@ -628,7 +652,13 @@ async function loadBackupList() {
     backups.value = r.files || []
     backupDir.value = r.dir || ''
     backupKeep.value = r.keep || 20
-  } catch (e) { ElMessage.error('读取备份列表失败：' + e.message) } finally { listing.value = false }
+    // 后端能读目录但目录不可用时会给 warn（例如宿主机目录权限不对），提示但不影响页面
+    if (r.warn) ElMessage.warning(r.warn)
+  } catch (e) {
+    backups.value = []
+    // 用后端返回的 message，避免只显示 "Request failed with status code 500"
+    ElMessage.error('读取备份列表失败：' + (e.__message || e.message))
+  } finally { listing.value = false }
 }
 
 function fmtTime(iso) {
@@ -655,7 +685,7 @@ async function onBackupCreate() {
     const blob = await R.backupDownload(r.name)
     await saveBlob(blob, r.name)
     loadBackupInfo(); loadBackupList()
-  } catch (e) { ElMessage.error('备份失败：' + e.message) } finally { exporting.value = false }
+  } catch (e) { ElMessage.error('备份失败：' + (e.__message || e.message)) } finally { exporting.value = false }
 }
 
 async function onBackupDownload(row) {
@@ -722,7 +752,7 @@ async function onBackupDelete(row) {
     await R.backupDelete(row.name)
     ElMessage.success('已删除')
     loadBackupList()
-  } catch (e) { ElMessage.error(e.message) }
+  } catch (e) { ElMessage.error(e.__message || e.message) }
 }
 
 /* ---------- 工单流转（服务台开关） ---------- */
@@ -741,7 +771,7 @@ async function saveWf() {
     workflow.service_desk_enable = !!r.service_desk_enable
     ElMessage.success('已保存，新工单将按新方式通知')
   } catch (e) {
-    ElMessage.error(e.message)
+    ElMessage.error(e.__message || e.message)
     loadWf()
   } finally { wfSaving.value = false }
 }

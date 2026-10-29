@@ -240,13 +240,7 @@ async function migrateModules() {
   }
 
   // 免登录报障入口密钥（生成一次后固定，二维码据此生成）
-  if (!(await settingGet('report_key'))) {
-    const key = require('crypto').randomBytes(9).toString('hex')
-    await settingSet('report_key', key)
-    console.log('[migrate] 已生成报障入口密钥', key)
-  }
-  if ((await settingGet('report_enable')) === null) await settingSet('report_enable', '1')
-  if ((await settingGet('faq_enable')) === null) await settingSet('faq_enable', '1')
+  await ensurePublicSettings()
   // 工单流转：服务台是可选角色。默认 0 = 不开服务台，新工单直接通知全部运维抢单
   if ((await settingGet('service_desk_enable')) === null) await settingSet('service_desk_enable', '0')
 
@@ -279,6 +273,35 @@ async function settingSet(k, v) {
     'INSERT INTO sys_setting (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = ?',
     [k, v, v]
   )
+}
+
+// 自助入口设置的「兜底自愈」--------------------------------------------------
+// 为什么需要：init.sql 只在数据卷为空时执行一次；升级上来的老库、或启动迁移被
+// 中断过的库，sys_setting 里可能整行缺失 report_key / report_enable / faq_enable。
+// 表现就是：设置页入口密钥为空 → 二维码一直是「生成中」→ 员工扫码报障打不开，
+// 报障接口还会因为 enable !== '1' 直接拒绝。
+// 这里在读接口按需补齐，保证任何部署形态都能自愈，且不依赖启动顺序。
+async function ensurePublicSettings() {
+  const rows = await query(
+    "SELECT k, v FROM sys_setting WHERE k IN ('report_key','report_enable','faq_enable')"
+  )
+  const map = {}
+  rows.forEach(r => { map[r.k] = r.v })
+
+  let key = map.report_key ? String(map.report_key).trim() : ''
+  if (!key) {
+    key = require('crypto').randomBytes(9).toString('hex')
+    await settingSet('report_key', key)
+    console.log('[setting] 已自动生成报障入口密钥')
+  }
+  if (map.report_enable === undefined || map.report_enable === null) await settingSet('report_enable', '1')
+  if (map.faq_enable === undefined || map.faq_enable === null) await settingSet('faq_enable', '1')
+
+  return {
+    key,
+    report_enable: (map.report_enable === undefined || map.report_enable === null) ? true : map.report_enable === '1',
+    faq_enable: (map.faq_enable === undefined || map.faq_enable === null) ? true : map.faq_enable === '1'
+  }
 }
 
 // 轻量迁移：为已有数据库补齐新增字段/新表（幂等，可重复执行）
@@ -378,4 +401,4 @@ async function seedDefaultUsers() {
   console.log('[seed] 已创建默认管理员账号 admin，请登录后立即修改密码')
 }
 
-module.exports = { seedDefaultUsers, migrateSchema, settingGet, settingSet }
+module.exports = { seedDefaultUsers, migrateSchema, settingGet, settingSet, ensurePublicSettings }

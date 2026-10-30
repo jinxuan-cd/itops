@@ -57,6 +57,8 @@
 
 **适用规模**：3～50 人的运维团队；单实例部署（无 Redis / 消息队列等外部依赖）。
 
+![x2-review](E:\WEB_server\workbuddyFile\it-ops-system-github\x2-review.png)
+
 ---
 
 ## 功能特性
